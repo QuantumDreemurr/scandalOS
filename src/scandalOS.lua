@@ -165,7 +165,7 @@ function appobject:icon(icon)
 	return appobject
 end
 
-desktop:prompt(0, "scandalOS is currently running on version "..VER, "scandalOS")
+--desktop:prompt(0, "scandalOS is currently running on version "..VER, "scandalOS")
 
 local sys = desktop:push{
 	class = "ImageLabel",
