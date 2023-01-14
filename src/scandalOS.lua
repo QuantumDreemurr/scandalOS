@@ -543,9 +543,8 @@ function newfile(title, ext, app, path)
 	local extData = Extentions[ext]
 	local obj = push(file)
 	
-	path = "Desktop"
 	obj.label.Text = title
-	InputObjects[obj] = {
+	local inputs = {
 		MouseEnter = function()
 			obj.highlight.BackgroundTransparency = 0.7
 		end,
@@ -555,6 +554,19 @@ function newfile(title, ext, app, path)
 	}
 	
 	local file = setmetatable({}, appobject)
+
+	if app.activated then
+		local clickts = os.clock()
+		inputs.MouseB1Down = function()
+			if os.clock() - clickts < 0.2 then
+				app.activated(file)
+			end
+			clickts = os.clock()
+		end
+	end
+
+	InputObjects[obj] = inputs
+	
 	file._base = obj
 	file._icon = app.icon or (extData.icon or "rbxassetid://782617573")
 	file.data = app
