@@ -1,13 +1,57 @@
-local rem = Instance.new("RemoteEvent", owner.Character)
+local Input = Instance.new("RemoteEvent", owner.Character)
+Input.Name = "Input"
 
 --made by local sexy man scandalous
 
+local tweenService = game:GetService("TweenService")
+
 local scheme = {
-	main = Color3.fromRGB(166, 110, 114),
-	dark = Color3.fromRGB(95, 77, 85),
+	main = Color3.fromRGB(102, 85, 95),
+	dark = Color3.fromRGB(86, 70, 77),
 	darklight = Color3.fromRGB(103, 61, 62),
-	border = Color3.fromRGB(163, 120, 121)
+	border = Color3.fromRGB(163, 120, 121),
+
+	main_text = Color3.fromRGB(255,255,255)
 }
+local InputObjects = {}
+
+local transparencyProperties = {
+	["ScrollingFrame"] = {
+		"ScrollBarImageTransparency",
+		"BackgroundTransparency"
+	},
+	["Frame"] = {
+		"BackgroundTransparency"
+	},
+	["ImageLabel"] = {
+		"BackgroundTransparency",
+		"ImageTransparency"
+	},
+	["ImageButton"] = {
+		"BackgroundTransparency",
+		"ImageTransparency"
+	},
+	["TextLabel"] = {
+		"BackgroundTransparency",
+		"TextTransparency",
+		"TextStrokeTransparency"
+	},
+	["TextBox"] = {
+		"BackgroundTransparency",
+		"TextTransparency",
+		"TextStrokeTransparency"
+	},
+	["TextButton"] = {
+		"BackgroundTransparency",
+		"TextTransparency",
+		"TextStrokeTransparency"
+	},
+}
+
+local brightness = 0.65
+for i, v in scheme do 
+	scheme[i] = Color3.new(v.R * brightness,v.G * brightness,v.B * brightness)
+end
 
 local root = Instance.new("Part")
 root.Name = "root"
@@ -42,16 +86,37 @@ task.defer(function()
 	end
 end)
 
-local globalRef = {}
+local objects = {}
 function push(data) -- roact ripoff
 	local new = Instance.new(data.class or "Frame")
 	for i, v in data do 
-		if i ~= "class" and i ~= "children" and i ~= "ref" then
+		if i ~= "class" and i ~= "children" and i ~= "ref" and i ~= "input" then
 			new[i] = v
 		end
 	end
+	if data.input then
+		local added
+		added = new.AncestryChanged:Connect(function()
+			if new.Parent then
+				added:Disconnect()
+				if data.input.Drag then
+					task.wait(0.25)
+					Input:FireClient(owner, "drag", new)
+				end
+			end
+			if new.Parent == nil then
+				added:Disconnect()
+				InputObjects[new] = nil
+			end
+		end)
+		InputObjects[new] = data.input
+	end
 	if data.ref then
-		globalRef[data.ref] = new
+		if typeof(data.ref) == "table" then
+			data.ref[2][data.ref[1]] = new
+		else 
+			objects[data.ref] = new
+		end
 	end
 	if data.children then
 		for name, child in data.children do 
@@ -62,6 +127,89 @@ function push(data) -- roact ripoff
 	end
 
 	return new
+end
+
+local widgetobject = {}
+widgetobject.__index = widgetobject
+
+function widgetobject:mount(ui)
+	ui.Parent = self._base.holder
+	self._mount = ui
+end
+
+function widgetobject:close()
+	local ui = {unpack(self._base:GetDescendants()), self._base}
+
+	self.opened = false
+
+	local info = TweenInfo.new(0.1, Enum.EasingStyle.Cubic)
+
+	local tween = tweenService:Create(self._base, info, {Size = UDim2.fromOffset(self.sx - 200, self.sy - 200), BackgroundTransparency = 1})
+
+	for _, obj in next, self._base:GetDescendants() do 
+		local properties = transparencyProperties[obj.ClassName]
+		if properties then
+			for i = 1, #properties do 
+				tweenService:Create(obj, info, {[properties[i]] = 1}):Play()
+			end
+		end
+	end
+
+	self._closed:Fire()
+
+	tween:Play()
+	return tween.Completed
+end
+
+function widgetobject:destroy()
+	self._closed:Destroy()
+	self._base:Destroy()
+end
+
+function widgetobject:open()
+	self.opened = true
+
+	local info = TweenInfo.new(0.1, Enum.EasingStyle.Cubic)
+
+	self._base.Size = UDim2.fromOffset(self.sx - 200, self.sy - 200)
+	self._base.BackgroundTransparency = 1
+
+	local tween = tweenService:Create(self._base, info, {Size = UDim2.fromOffset(self.sx, self.sy), BackgroundTransparency = 0})
+
+	for _, obj in next, self._base:GetDescendants() do 
+		local properties = transparencyProperties[obj.ClassName]
+		if properties then
+			for i = 1, #properties do 
+				local og = obj[properties[i]]
+				obj[properties[i]] = 1
+				tweenService:Create(obj, info, {[properties[i]] = og}):Play()
+			end
+		end
+	end
+
+	tween:Play()
+	return tween.Completed
+end
+
+function widgetobject:title(str)
+	self._base.top.holder.left.label.Size = UDim2.new(0,game:GetService("TextService"):GetTextSize(str, 25, Enum.Font.Legacy, Vector2.new(self.sx, 0)).X,1,0)
+	self._base.top.holder.left.label.Text = str
+end
+
+function widgetobject:icon(str)
+	self._base.top.holder.left.icon.Image = str
+end
+
+function widgetobject:move(x, y)
+	self._base.Position = UDim2.fromOffset(x, y)
+	self.x = x 
+	self.y = y 
+end
+
+function widgetobject:size(x, y)
+	self.sx = x 
+	self.sy = y 
+	self._base.Size = UDim2.fromOffset(x, y)
 end
 
 local screenobject = {}
@@ -87,45 +235,206 @@ function screenobject:widget(name, data)
 			canfs : boolean?,
 		}
 	]]
-	local new = self:push{
-		Size = UDim2.fromOffset(data.x or 2127, data.y or 1158),
-		Position = UDim2.fromOffset(data.x or console.AbsoluteSize.X / 2, data.y or console.AbsoluteSize.Y / 2),
+
+	local widget = setmetatable({}, widgetobject)
+
+	local size = UDim2.fromOffset(data.sx or 2127, data.sy or 1158)
+	local new
+	local last = os.clock()
+	new = push{
+		Size = size,
+		AnchorPoint = Vector2.one/2,
+		Position = UDim2.fromOffset(data.x or (console.AbsoluteSize.X / 2), data.y or (console.AbsoluteSize.Y / 2)),
 		BackgroundColor3 = scheme.border,
-		
+
 		children = {
 			corner = {
 				class = "UICorner",
-				
+
 				CornerRadius = UDim.new(0,20)
+			},
+			top = {
+				BackgroundColor3 = scheme.dark,
+				Size = UDim2.new(1,0,0,80),
+
+				children = {
+					cover = {
+						Size = UDim2.fromScale(1,0.3),
+						Position = UDim2.fromScale(0,0.7),
+						BackgroundColor3 = scheme.dark,
+						BorderSizePixel = 0,
+					},
+					corner = {
+						class = "UICorner",
+
+						CornerRadius = UDim.new(0,20)
+					},
+					holder = {
+						input = {
+							Drag = function(position)
+								tweenService:Create(new, TweenInfo.new(os.clock() - last, Enum.EasingStyle.Linear), {Position = position + UDim2.fromOffset(new.AbsoluteSize.X/2, new.AbsoluteSize.Y/2)}):Play()
+								widget.x = new.AbsolutePosition.X
+								widget.y = new.AbsolutePosition.Y
+								last = os.clock()
+							end,
+						},
+
+
+						Size = UDim2.fromScale(1,1),
+						BackgroundTransparency = 1,
+
+						children = { 
+							padding = {
+								class = "UIPadding",
+
+								PaddingBottom = UDim.new(0,13),
+								PaddingLeft = UDim.new(0,13),
+								PaddingRight = UDim.new(0,13),
+								PaddingTop = UDim.new(0,13),
+							},
+							left = {
+								Size = UDim2.fromScale(0.5,1),
+								BackgroundTransparency = 1,
+								ZIndex = 2,
+
+								children = {
+									list = {
+										class = "UIListLayout",
+
+										FillDirection = Enum.FillDirection.Horizontal,
+										Padding = UDim.new(0,16)
+									},
+									icon = {
+										class = "ImageLabel",
+
+										Image = data.icon or "rbxassetid://12154980802",
+										Size = UDim2.new(0,50,1,0),
+										BackgroundTransparency = 1,
+										ScaleType = Enum.ScaleType.Fit
+									},
+									label = {
+										class = "TextBox",
+
+										TextEditable = false,
+										ClearTextOnFocus = false,
+										TextColor3 = scheme.main_text,
+										Text = name,
+										TextSize = 25,
+										TextXAlignment = Enum.TextXAlignment.Left,
+										TextTruncate = Enum.TextTruncate.AtEnd,
+										Size = UDim2.new(0,game:GetService("TextService"):GetTextSize(name, 25, Enum.Font.Legacy, Vector2.new(size.X, 0)).X,1,0),
+										BackgroundTransparency = 1
+									}
+								}
+							},
+							right = {
+								Size = UDim2.fromScale(0.5,1),
+								Position = UDim2.fromScale(0.5, 0),
+								BackgroundTransparency = 1,
+								ZIndex = 2,
+
+								children = {
+									list = {
+										class = "UIListLayout",
+
+										FillDirection = Enum.FillDirection.Horizontal,
+										Padding = UDim.new(0,6),
+										HorizontalAlignment = Enum.HorizontalAlignment.Right,
+									},
+
+									[1] = {
+										class = "TextButton",
+										input = {
+											MouseB1Down = function()
+											end,
+										},
+
+										Text = "-",
+										TextColor3 = scheme.main_text,
+										TextSize = 35,
+										Size = UDim2.new(0,50,1,0),
+										BackgroundTransparency = 1,
+									},
+									[2] = {
+										class = "TextButton",
+										input = {
+											MouseB1Down = function()
+											end,
+										},
+
+										Text = "□",
+										TextColor3 = scheme.main_text,
+										TextSize = 25,
+										Size = UDim2.new(0,50,1,0),
+										BackgroundTransparency = 1,
+									},
+									[3] = {
+										class = "TextButton",
+										input = {
+											MouseB1Down = function()
+												widget:close():Wait()
+												widget:destroy()
+											end,
+										},
+
+										Text = "X",
+										TextColor3 = scheme.main_text,
+										TextSize = 18,
+										Size = UDim2.new(0,50,1,0),
+										BackgroundTransparency = 1,
+									},
+								}
+							}
+						}
+					}
+				}
+			},
+			holder = {
+				Position = UDim2.fromOffset(0,80),
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1,0,1,-80),
+
+				children = {
+					padding = {
+						class = "UIPadding",
+
+						PaddingBottom = UDim.new(0,2),
+						PaddingLeft = UDim.new(0,2),
+						PaddingRight = UDim.new(0,2),
+						PaddingTop = UDim.new(0,2),
+					},
+					corner = {
+						class = "UICorner",
+
+						CornerRadius = UDim.new(0,20)
+					},
+				}
 			}
 		}
 	}
-end
 
-function screenobject:push(data) -- roact ripoff 2
-	local new = Instance.new(data.class or "Frame")
-	for i, v in data do 
-		if i ~= "class" and i ~= "children" and i ~= "ref" then
-			new[i] = v
-		end
-	end
-	if data.ref then
-		self[data.ref] = new
-	end
-	if data.children then
-		for name, child in data.children do 
-			self:push(child)(new).Name = name
-		end
-	end
-	
-	return function(parent)
-		new.Parent = parent or self._base
-		return new
-	end
+	widget.x = new.Position.X.Offset
+	widget.y =new.Position.Y.Offset
+	widget.sx = new.Size.X.Offset
+	widget.sy = new.Size.Y.Offset
+
+	new.Parent = self._base
+
+	local closed = Instance.new("BindableEvent")
+	widget._closed = closed
+	widget.closed = closed.Event
+
+	widget._base = new
+
+	return widget
 end
 
 function screenobject:prompt(type, title, text)
 	local widget = self:widget(title)
+end
+
+function screenobject:mount(ui)
+	ui.Parent = self._base
 end
 
 Util = {
@@ -144,7 +453,7 @@ Util = {
 		local screen = setmetatable({}, screenobject)
 		screen._base = f
 		screen._children = {}
-		
+
 		return screen
 	end,
 }
@@ -167,27 +476,27 @@ end
 
 --desktop:prompt(0, "scandalOS is currently running on version "..VER, "scandalOS")
 
-local sys = desktop:push{
+local sys = push{
 	class = "ImageLabel",
-	
+
 	AnchorPoint = Vector2.one / 2,
 	Position = UDim2.fromScale(0.5,0.5),
 	Size = UDim2.fromScale(1,1),
 	Image = "http://www.roblox.com/asset/?id=12149779984",
-	
+
 	children = {
 		desktop = {
-			
+
 			Size = UDim2.new(1,0,1,-165),
 			BackgroundTransparency = 1,
-			
+
 			children = {
 				inner = {	
 					ref = "desktop_apps",
-					
+
 					BackgroundTransparency = 1,
 					Size = UDim2.fromScale(1,1),
-					
+
 					children = {
 						grid = {
 							class = "UIGridLayout",
@@ -212,16 +521,16 @@ local sys = desktop:push{
 			Position = UDim2.new(0,0,1,-165),
 			BorderSizePixel = 0,
 			BackgroundColor3 = Color3.fromRGB(255,255,255),
-			
+
 			children = {
 				apps = {
 					Size = UDim2.fromScale(1,1),
 					BackgroundTransparency = 1,
-					
+
 					children = {
 						inner = {					
 							ref = "pinned_apps",
-							
+
 							BackgroundTransparency = 1,
 							Size = UDim2.fromScale(1 - 0.04,1),
 							Position = UDim2.fromScale(0.04,0),
@@ -248,17 +557,29 @@ local sys = desktop:push{
 				start = {
 					ref = "start_button",
 					class = "ImageButton",
-					
+					input = {
+						MouseB1Down = function()
+							tweenService:Create(objects.start_button, TweenInfo.new(0.4, Enum.EasingStyle.Cubic), {Rotation = objects.start_button.Rotation + 90}):Play()
+						end,
+						MouseEnter = function()
+							tweenService:Create(objects.start_button, TweenInfo.new(0.4, Enum.EasingStyle.Cubic), {Size = UDim2.fromScale(0.049, 0.59)}):Play()
+						end,
+						MouseLeave = function()
+							tweenService:Create(objects.start_button, TweenInfo.new(0.4, Enum.EasingStyle.Cubic), {Size = UDim2.fromScale(0.04, 0.5)}):Play()
+						end,
+					},
+
 					Image = "rbxassetid://4689592016",
-					Size = UDim2.fromScale(0.04,0.5),
+					Size = UDim2.fromScale(0.04, 0.5),
 					Rotation = 45,
+					AnchorPoint = Vector2.one / 2,
 					ScaleType = Enum.ScaleType.Fit,
-					Position = UDim2.fromScale(0.003,0.25),
+					Position = UDim2.fromScale(0.02,0.5),
 					BackgroundTransparency = 1,
 				},
 				gradient = {
 					class = "UIGradient",
-					
+
 					Color = ColorSequence.new({
 						ColorSequenceKeypoint.new(0, Color3.fromRGB(34, 49, 49)),
 						ColorSequenceKeypoint.new(0.1, Color3.fromRGB(28, 37, 39)),
@@ -269,233 +590,62 @@ local sys = desktop:push{
 			}
 		}
 	}
-}()
+}
+
+main:mount(sys)
 
 local Extentions = {
-	["exe"] = {function() end, icon = "http://www.roblox.com/asset/?id=12151567147"},
+	["exe"] = {function() end, icon = "rbxassetid://12154969411"},
 	["lua"] = {function() end, icon = "rbxassetid://5588630"},
 	["dec"] = {function(s)
 		s:icon(s.data.content)
 	end},
-	["txt"] = {function() end, icon = "http://www.roblox.com/asset/?id=12151606601"},
+	["txt"] = {function() end, icon = "rbxassetid://12154964558"},
 	["snd"] = {function() end, icon = "rbxassetid://9206046736"},
-	
+
 	["_exp"] = {function() end, icon = "rbxassetid://12153795262"},
-	["_rec"] = {function() end, icon = "rbxassetid://3390460027"}
+	["_rec"] = {function() end, icon = "rbxassetid://12154966342"}
 }
 
-local filesys = (function()
-	--// Written by: R0bl0x10501050
-
-	--// Filename: TraversableTable.lua
-
-	----
-
-	local function checkDictionary(tbl)
-		local isDict = true
-		for i, v in pairs(tbl) do -- accurately get the "first" element to check
-			if i == 1 then
-				isDict = false
-			end
-			break
-		end
-		return isDict
-	end
-
-	local function safeGetLength(tbl)
-		if typeof(tbl) == "table" then
-			local isDict = checkDictionary(tbl)
-			local length = 0
-			if isDict then
-				for _, _ in pairs(tbl) do
-					length += 1
-				end
-			else
-				length = #tbl
-			end
-			return length
-		else
-			return 0
-		end
-	end
-
-	local Node
-	Node = {
-		__newindex = function(t, k, v)
-			local isDict
-			if not rawget(t, '_children') then
-				rawset(t, '_children', {})
-				isDict = (k == 1)
-			else
-				isDict = checkDictionary(rawget(t, '_children'))
-			end
-
-			local newNode = Node.new(v)
-			rawset(newNode, 'Parent', t)
-
-			if isDict then
-				rawset(t, '_idx', k)
-				rawset(rawget(t, '_children'), k, newNode)
-			else
-				rawset(t, '_idx', #rawget(t, '_children') + 1)
-				table.insert(rawget(t, '_children'), newNode)
-			end
-		end,
-		__index = function(t, k)
-			return rawget(rawget(t, '_children'), k)
-			--if checkDictionary(t._children) then
-			--	return rawget(t._children, k)
-			--else
-			--	return rawget(t._children, k)
-			--end
-		end,
-	}
-
-	function Node.new(value)
-		local self = setmetatable({
-			_raw = value
-		}, Node)
-
-		if typeof(value) == "string" or typeof(value) == "number" or typeof(value) == "boolean" or typeof(value) == "userdata" or typeof(value) == "function" then
-			rawset(self, '_type', 'primitive')
-		elseif typeof(value) == "table" then
-			rawset(self, '_type', 'complex')
-
-			local isDict = checkDictionary(value)
-
-			rawset(self, '_children', {})
-
-			if isDict then
-				for k, v in pairs(value) do
-					local newNode = Node.new(v)
-					rawset(newNode, 'Parent', self)
-					rawset(newNode, '_idx', k)
-					rawset(rawget(self, '_children'), k, newNode)
-				end
-			else
-				for _, v in ipairs(value) do
-					local newNode = Node.new(v)
-					rawset(newNode, 'Parent', self)
-					rawset(newNode, '_idx', safeGetLength(rawget(self, '_children')) + 1)
-					table.insert(self._children, newNode)
-				end
-			end
-		end
-
-		rawset(self, "Any", function()
-			return {
-				ForEach = function(f)
-					for _, v in ipairs(self._children) do
-						f(v)
-					end
-				end,
-				Connect = function(f)
-					for _, v in ipairs(self._children) do
-						if v.Connect then
-							v:Connect(f)
-						end
-					end
-				end,
-			}
-		end)
-
-		rawset(self, "Construct", function()
-			local function _construct(n)
-				if rawget(n, '_type') == "primitive" then
-					return rawget(n, '_raw')
-				elseif rawget(n, '_type') == "complex" then
-
-					local tbl = {}
-					for k, v in pairs(rawget(n, '_children')) do
-						if typeof(v) == "table" then
-							tbl[k] = _construct(v)
-						else
-							tbl[k] = rawget(v, '_raw')
-						end
-					end
-					return tbl
-				end
-			end
-
-			return _construct(self)
-		end)
-
-		rawset(self, "Get", function()
-			return rawget(self, '_raw')
-		end)
-
-		rawset(self, "List", function()
-			local isDict = checkDictionary(rawget(self, '_children'))
-			local keys = {}
-			for k, _ in pairs(rawget(self, '_children')) do
-				table.insert(keys, k)
-			end
-			return keys
-		end)
-
-		rawset(self, "Set", function(self2, new)
-			if rawget(self, 'Parent') then
-				local newNode = Node.new(new)
-				local oldIdx = rawget(self, '_idx')
-				rawset(rawget(rawget(self, 'Parent'), '_children'), rawget(self, '_idx'), newNode)
-				--self.Parent._children[self._idx] = newNode
-				self = nil
-				--local isDict = checkDictionary(self.Parent._children)
-				--if isDict then
-				--	rawe
-				--else
-
-				--end
-			end
-		end)
-
-		return self
-	end
-
-	--function Node:Get()
-	--	return self._raw
-	--end
-
-	--function Node:List()
-	--	local isDict = checkDictionary(self._children)
-	--	local keys = {}
-	--	if isDict then
-	--		for k, _ in pairs(self._children) do
-	--			table.insert(keys, k)
-	--		end
-	--	end
-	--	return keys
-	--end
-
-
-
-	local TraversableTable = {}
-
-	function TraversableTable.new(tbl)
-		--local self = setmetatable({
-		--	_raw = tbl,
-		--	_tbl = Node.new(tbl)
-		--}, TraversableTable)
-
-		--return self
-		return Node.new(tbl)
-	end
-
-	return TraversableTable
-end)()
-
-local files = filesys.new{
-	OS = {
-		Desktop = {
-			internal = true,
-			children = {
-
-			}
-		}
+local files = {
+	["_THISPC"] = {
+		name = "This PC",
+		internal = true,
+		visible = false,
+		icon = "rbxassetid://12166186986",
+		children = {}
 	}
 }
 
-local InputObjects = {}
+
+files._THISPC.children._DESKTOP = {
+	name = "Desktop",
+	internal = true,
+	icon = "rbxassetid://12166175276",
+	parent = files._THISPC,
+	children = {}
+}
+files._THISPC.children._DOCUMENTS = {
+	name = "Documents",
+	internal = true,
+	icon = "rbxassetid://12166015476",
+	parent = files._THISPC,
+	children = {}
+}
+files._THISPC.children._PICTURES = {
+	name = "Pictures",
+	internal = true,
+	icon = "rbxassetid://12166015476",
+	parent = files._THISPC,
+	children = {}
+}
+files._THISPC.children._MUSIC = {
+	name = "Music",
+	internal = true,
+	icon = "rbxassetid://12166016634",
+	parent = files._THISPC,
+	children = {}
+}
 
 local file = {
 	class = "TextButton",
@@ -539,11 +689,20 @@ local file = {
 	}
 }
 
+function getFile(name, dir)
+	for id, d in dir  do
+		if d.name == name then
+			return d, id
+		end
+	end
+end
+
 function newfile(title, ext, app, path)
 	local extData = Extentions[ext]
 	local obj = push(file)
-	
+
 	obj.label.Text = title
+
 	local inputs = {
 		MouseEnter = function()
 			obj.highlight.BackgroundTransparency = 0.7
@@ -552,7 +711,7 @@ function newfile(title, ext, app, path)
 			obj.highlight.BackgroundTransparency = 1
 		end,
 	}
-	
+
 	local file = setmetatable({}, appobject)
 
 	if app.activated then
@@ -566,92 +725,60 @@ function newfile(title, ext, app, path)
 	end
 
 	InputObjects[obj] = inputs
-	
+
 	file._base = obj
-	file._icon = app.icon or (extData.icon or "rbxassetid://782617573")
+	file._icon = app.icon or ((extData and extData.icon) or "rbxassetid://12154980802")
 	file.data = app
 	file.path = path .. "/" .. title .. "." .. ext
-	
+
 	obj.icon.Image = file._icon
-	
+
 	local dir = path:split("/")
-	local parent = files.OS
+	local parent = getFile("This PC", files)
 
 	for i = 1, #dir do 
-		local found = parent[dir[i]]
+		local found = getFile(dir[i], parent.children)
 		if found then
 			parent = found
 		end
 	end
-
+	if not parent then
+		error(path.. " is not a valid path")
+		return
+	end
 	if path == "Desktop" then
-		obj.Parent = desktop.desktop_apps
+		obj.Parent = objects.desktop_apps
 	end
 
-	parent.children[title .. "." .. ext] = {
-		object = obj,
-		children = {}
-	}
-	
-	extData[1](file)
-
-	return file
-end
-
-function newfolder(title, path)
-	local obj = push(file)
-
-	obj.label.Text = title
-	InputObjects[obj] = {
-		MouseEnter = function()
-			obj.highlight.BackgroundTransparency = 0.7
-		end,
-		MouseLeave = function()
-			obj.highlight.BackgroundTransparency = 1
-		end,
-	}
-
-	local file = setmetatable({}, appobject)
-	file._base = obj
-	file._icon = "http://www.roblox.com/asset/?id=12152267187"
-	file._folder = true
-	file.path = path .. "/" .. title
-	
-	local dir = path:split("/")
-	local parent = files.OS
-	
-	for i = 1, #dir do 
-		local found = parent[dir[i]]
-		if found then
-			parent = found
-		end
+	if extData then
+		extData[1](file)
 	end
 
-	if path == "Desktop" then
-		obj.Parent = desktop.desktop_apps
-	end
-	
-	parent.children[title] = {
-		object = obj,
-		children = {}
+
+	parent.children[game:GetService("HttpService"):GenerateGUID()] = {
+		name = title,
+		ext = ext,
+		icon = file._icon,
+		children = {},
+		parent = parent,
 	}
-	
-	obj.icon.Image = file._icon
-	
+
 	return file
 end
 
 do -- INTERNAL FILES
 	local removed = {}	
 
-	local exp = newfile("File Explorer", "_exp", {
+
+	newfile("Command Prompt", "exe", {
 		activated = function()
-			local widget = desktop:widget("File Explorer")
-			local explorer = push{
-				Size = UDim2.fromOffset(2127,1158),
-				AnchorPoint = Vector2.one / 2,
-				Position = UDim2.fromOffset(0.5,0.5),
-				BackgroundColor3 = scheme.main,
+			local w = desktop:widget("Command Prompt", {
+				icon = "rbxassetid://12167518904"
+			})
+			local txt = "scandalOS [Version "..VER.."]\nscandalous#2792\n\nC:/Desktop/"
+			local ui = push{
+				Size = UDim2.fromScale(1,1),
+				BackgroundColor3 = Color3.new(),
 
 				children = {
 					corner = {
@@ -659,55 +786,412 @@ do -- INTERNAL FILES
 
 						CornerRadius = UDim.new(0,20)
 					},
-					side = {
-						Size = UDim2.fromScale(0.15,1),
-						BackgroundColor3 = Color3.new(1,1,1),
+					cover = {
+						Size = UDim2.fromScale(1,0.04),
+						BackgroundColor3 = Color3.new(),
+						BorderSizePixel = 0,
+						ZIndex = 0, 
+					},
+					label = {
+						class = "TextBox",
 
-						children = {
-							cover = {
-								Position = UDim2.fromScale(0.85,0),
-								Size = UDim2.fromScale(0.15,1),
-								BorderSizePixel = 0,
-
-								children = {
-									gradient = {
-										class = "UIGradient",
-
-										Color = ColorSequence.new({
-											ColorSequenceKeypoint.new(0, scheme.dark),
-											ColorSequenceKeypoint.new(0.806, scheme.dark),
-											ColorSequenceKeypoint.new(1, scheme.darklight),
-										})
-									}
-								}
-							}
-						}
+						ZIndex = 2,
+						Size = UDim2.fromScale(1,1),
+						BackgroundTransparency = 1,
+						TextSize = 30,
+						TextColor3 = Color3.new(1,1,1),
+						TextXAlignment = Enum.TextXAlignment.Left,
+						TextYAlignment = Enum.TextYAlignment.Top,
+						ClearTextOnFocus = false,
+						TextEditable = false,
+						Text = "scandalOS [Version "..VER.."]\nscandalous#2792\n\nC:/Desktop/",
 					}
 				}
 			}
 			
-			explorer.Parent = widget
+			w:mount(ui)
+			
+			task.defer(function()
+				local i = 0
+				while true do 
+					task.wait(0.5)
+					i += 1
+					ui.label.Text = txt .. (i%2 == 0 and "█" or "")
+				end
+			end)
+
 		end,
-	}, "Desktop") 
-	local rec = newfile("Recycle Bin", "_rec", {}, "Desktop")
-	
-	local recyclebin = {
-		delete = function(path)
+		icon = "rbxassetid://12167518904"
+	}, "Desktop")
+
+	function openExplorer(path)
+		local widget = desktop:widget("File Explorer", {
+			icon = Extentions._exp.icon
+		})
+		local exp = {}
+		local selected
+		local explorer = push{
+			Size = UDim2.fromScale(1,1),
+			Position = UDim2.fromOffset(0.5,0.5),
+			BackgroundColor3 = scheme.main,
+
+			children = {
+				cover = {
+					Size = UDim2.fromScale(1,0.04),
+					BackgroundColor3 = scheme.dark,
+					BorderSizePixel = 0,
+					ZIndex = 0, 
+
+					children = {
+						label = {
+							ref = {"adr", exp},
+							class = "TextBox",
+
+							Size = UDim2.fromScale(1 - 0.22,1),
+							Position = UDim2.fromScale(0.22,0),
+							TextColor3 = scheme.main_text,
+							TextSize = 18,
+							TextXAlignment = Enum.TextXAlignment.Left,
+							BackgroundTransparency = 1,
+							ClearTextOnFocus = false,
+							Text = "C:/"..(path or "")
+						}
+					}
+				},
+				main = {
+					Position = UDim2.fromScale(0.21,0.04),
+					Size = UDim2.fromScale(0.79,1 - 0.04),
+					BackgroundTransparency = 1,
+
+					children = {
+						inner = {
+							class = "ScrollingFrame",
+							ref = {"inner", exp},
+
+							Size = UDim2.fromScale(1,1),
+							BackgroundTransparency = 1,
+							ClipsDescendants = true,
+
+							children = {
+								grid = {
+									class = "UIGridLayout",
+
+									CellPadding = UDim2.fromOffset(33,33),
+									CellSize = UDim2.fromOffset(180,180)
+								},
+							}
+						},
+						padding = {
+							class = "UIPadding",
+
+							PaddingBottom = UDim.new(0,30),
+							PaddingLeft = UDim.new(0,30),
+							PaddingRight = UDim.new(0,30),
+							PaddingTop = UDim.new(0,30),
+						}
+					}
+				},
+				corner = {
+					class = "UICorner",
+
+					CornerRadius = UDim.new(0,20),
+				},
+				side = {						
+					BorderSizePixel = 0,
+					Size = UDim2.fromScale(0.21,1),
+					BackgroundColor3 = scheme.dark,
+
+					children = {
+						holder = {
+							Size = UDim2.fromScale(1,1),
+							BackgroundTransparency = 1,
+
+							children = {
+								padding = {
+									class = "UIPadding",
+
+									PaddingBottom = UDim.new(0,9),
+									PaddingLeft = UDim.new(0,9),
+									PaddingRight = UDim.new(0,9),
+									PaddingTop = UDim.new(0,9),
+								},
+								scroll = {
+									class = "ScrollingFrame",
+									ref = {"scroll", exp},
+
+									BorderSizePixel = 0,
+									BackgroundTransparency = 1,
+									Size = UDim2.fromScale(1,1),
+
+									children = {
+										list = {
+											class = "UIListLayout",
+										},	
+									}
+								},
+							}
+						},
+						corner = {
+							class = "UICorner",
+
+							CornerRadius = UDim.new(0,20)
+						},
+						cover = {
+							Position = UDim2.fromScale(0.97,0),
+							Size = UDim2.fromScale(0.03,1),
+							BackgroundColor3 = scheme.dark,
+							BorderSizePixel = 0,
+						}
+					}
+				}
+			}
+		}
+
+		widget:mount(explorer)
+		widget:open()
+
+		local function rec(tble, preopen, parent, indent)
+			indent = indent or 0
+			for id, data in tble do 
+				local name = data.name
+				local toggle = false 
+				local s = {}
+
+				local tab = push{
+					Size = UDim2.new(1,0,0,60),
+					BackgroundTransparency = 1,
+					Name = "child",
+					ref = {"tab", s},
+
+					children = {
+						list = {
+							class = "UIListLayout",
+
+							HorizontalAlignment = Enum.HorizontalAlignment.Right,
+						},
+					}
+				}
+
+				local haschildren = false
+
+				local children = {}
+				for id, data2 in next, data.children do 
+					if data2.folder or data2.internal then
+						children[id] = data2
+						haschildren = true
+					end
+				end
+
+				local md
+
+				local dropdown = {
+					ref = {"dd", s},
+					class = "TextButton",
+					input = {
+						MouseEnter = function()
+							if selected ~= s.dd then
+								s.dd.BackgroundTransparency = 0.8
+							end
+						end,
+						MouseLeave = function()
+							if selected ~= s.dd then
+								s.dd.BackgroundTransparency = 1
+							end
+						end,
+						MouseB1Down = function()
+							if selected then
+								selected.BackgroundTransparency = 1
+							end
+							s.dd.BackgroundTransparency = 0.65
+							selected = s.dd
+							local path = {}
+							local dir = data
+
+							while true do
+								if dir.parent == nil then
+									break
+								end
+								table.insert(path, dir.name .. (dir.ext and ("." .. dir.ext) or ""))
+								dir = dir.parent
+							end 
+							print(path)
+							for i = 1, math.floor(#path/2) do
+								local j = #path - i + 1
+								path[i], path[j] = path[j], path[i]
+							end
+
+							exp.adr.Text = "C:/"..table.concat(path, "/")
+
+							for _, obj in exp.inner:GetChildren() do 
+								if not obj:IsA("UIGridLayout") then
+									obj:Destroy()
+								end
+							end
+							for _, data2 in data.children do 
+								local name2 = data2.name
+								local new = push(file)
+								new.label.Text = name2
+								new.label.TextSize /= 2
+								new.icon.Image = data2.icon
+								new.Parent = exp.inner
+							end
+						end,
+					},
+
+					AutoButtonColor = false,
+					BorderSizePixel = 0,
+					BackgroundColor3 = Color3.new(1,1,1),
+					Text = "",
+					Size = UDim2.new(1,-25 * indent,0,60),
+					BackgroundTransparency = 1,
+
+					children = {
+						list = {
+							class = "UIListLayout",
+
+							FillDirection = Enum.FillDirection.Horizontal,
+							Padding = UDim.new(0,12)
+						},
+						drop = {
+							input = haschildren and {
+								MouseB1Down = function()
+									toggle = not toggle
+									s.btn.Text = toggle and "v" or ">"
+									if toggle then
+										local i = 1
+										for _, obj in s.tab:GetChildren() do 
+											if obj.Name == "child" then
+												obj.Visible = true
+												i += 1
+											end
+										end
+										s.tab.Size = UDim2.new(1,0,0,60 * i)
+									else 
+										s.tab.Size = UDim2.new(1,0,0,60)
+										for _, obj in s.tab:GetChildren() do 
+											if obj.Name == "child" then
+												obj.Visible = false
+											end
+										end
+									end
+								end,
+							} or nil,
+							ref = {"btn", s},
+							class = "TextButton",
+
+							TextColor3 = scheme.main_text,
+							Text = haschildren and ">" or "",
+							TextSize = 30,
+							FontFace = Font.new("rbxasset://fonts/families/FredokaOne.json", Enum.FontWeight.Bold),
+							Size = UDim2.new(0,30,0,60),
+							TextTransparency = 0.4,
+							BackgroundTransparency = 1
+						},
+						icon = {
+							class = "ImageLabel",
+
+							Image = data.icon,
+							Size = UDim2.new(0,50,0,60),
+							BackgroundTransparency = 1,
+							ScaleType = Enum.ScaleType.Fit
+						},
+						label = {
+							class = "TextBox",
+
+							TextEditable = false,
+							ClearTextOnFocus = false,
+							TextColor3 = scheme.main_text,
+							Text = name,
+							TextSize = 25,
+							TextXAlignment = Enum.TextXAlignment.Left,
+							TextTruncate = Enum.TextTruncate.AtEnd,
+							Size = UDim2.new(1,-50,0,60),
+							BackgroundTransparency = 1
+						}
+					}
+				}
+
+				tab.Parent = parent or exp.scroll
+
+				if parent then
+					tab.Visible = false
+				end
+
+				push(dropdown).Parent = s.tab
+				rec(children, preopen, tab, (indent or 0) + 1)
+
+				if preopen and id == preopen then
+					local toopen = parent
+					while true do
+						if toopen == exp.scroll then
+							break
+						end
+						local i = 1
+						toopen.TextButton.drop.Text = "v"
+						for _, obj in toopen:GetChildren() do 
+							if obj.Name == "child" then
+								obj.Visible = true
+								i += 1
+							end
+						end
+						s.tab.Size = UDim2.new(1,0,0,60 * i)
+						toopen = toopen.Parent
+					end 
+					InputObjects[s.dd].MouseB1Down()
+				end
+			end
+		end
+
+		if path then
+			exp.adr.Text = "C:/" .. path
 			local dir = path:split("/")
-			local file = files.OS
+			local parent = getFile("This PC", files).children
 
 			for i = 1, #dir do 
-				local found = file[dir[i]]
+				local found, id = getFile(dir[i], parent)
 				if found then
-					file = found
 					if i == #dir then
-						removed[path] = found
-						file[dir[i]] = nil
+						parent = id
+					else 
+						parent = found.children
 					end
 				end
 			end
-			
-			rec:icon("rbxassetid://6121397353")
+
+			if not parent then
+				error(path.. " is not a valid path")
+				return
+			end
+
+			rec(files, parent)
+		else
+			rec(files)
+		end
+	end
+
+	local exp = newfile("File Explorer", "_exp", {
+		activated = function()
+			openExplorer()
+		end,
+	}, "Desktop") 
+	local rec = newfile("Recycle Bin", "_rec", {}, "Desktop")
+
+	local recyclebin = {
+		delete = function(path)
+			local dir = path:split("/")
+			local parent = getFile("This PC", files).children
+
+			for i = 1, #dir do 
+				local found = getFile(dir[i], parent)
+				if found then
+					parent = found.children
+					if i == #dir and not found.internal then
+						removed[path] = found
+						file[dir[i]] = nil
+						rec:icon("rbxassetid://12154971175")
+					end
+				end
+			end
 		end,
 		restore = function(path)
 			local torestore = removed[path]
@@ -720,8 +1204,8 @@ do -- INTERNAL FILES
 					newfile(filename[1], filename[2], torestore.data, path)
 				end
 			end
-			
-			rec:icon("rbxassetid://3390460027")
+
+			rec:icon("rbxassetid://12154966342")
 		end,
 		clear = function()
 			for i, v in removed do 
@@ -732,70 +1216,167 @@ do -- INTERNAL FILES
 	}
 end
 
+
+function newfolder(title, path)
+	local obj = push(file)
+
+	obj.label.Text = title
+	local clickts = os.clock()
+
+	InputObjects[obj] = {
+		MouseEnter = function()
+			obj.highlight.BackgroundTransparency = 0.7
+		end,
+		MouseLeave = function()
+			obj.highlight.BackgroundTransparency = 1
+		end,
+		MouseB1Down = function()
+			if os.clock() - clickts < 0.2 then
+				openExplorer(path .. "/" .. title)
+			end
+			clickts = os.clock()
+		end
+	}
+
+	local file = setmetatable({}, appobject)
+	file._base = obj
+	file._icon = "rbxassetid://12154972021"
+	file._folder = true
+	file.path = path .. "/" .. title
+
+	local dir = path:split("/")
+	local parent = getFile("This PC", files)
+
+	for i = 1, #dir do 
+		local found = getFile(dir[i], parent.children)
+		if found then
+			parent = found
+		end
+	end	
+	if not parent then
+		error(path.. " is not a valid path")
+		return
+	end
+
+	if path == "Desktop" then
+		obj.Parent = objects.desktop_apps
+	end
+
+	parent.children[game:GetService("HttpService"):GenerateGUID()] = {
+		name = title,
+		object = obj,
+		icon = file._icon,
+		folder = true,
+		children = {},
+		parent = parent,
+	}
+
+	obj.icon.Image = file._icon
+
+	return file
+end
+
 local hw = newfolder("HOMEWORK", "Desktop")
 
-newfile("1", "dec", {
-	content = "rbxassetid://10973602799"
-}, hw.path)
-newfile("2", "dec", {
-	content = "rbxassetid://11933539182"
-}, hw.path)
-newfile("3", "dec", {
-	content = "rbxassetid://11114834710"
-}, hw.path)
-newfile("4", "dec", {
-	content = "rbxassetid://11160575793"
-}, hw.path)
-newfile("5", "dec", {
-	content = "rbxassetid://11933509898"
-}, hw.path)
-newfile("6", "dec", {
-	content = "rbxassetid://11933523815"
-}, hw.path)
-newfile("7", "dec", {
-	content = "rbxassetid://7355974967"
-}, hw.path)
-newfile("8", "dec", {
-	content = "rbxassetid://6998029717"
-}, hw.path)
-newfile("9", "dec", {
-	content = "rbxassetid://10617251275"
-}, hw.path)
-newfile("10", "dec", {
-	content = "rbxassetid://10617251275"
-}, hw.path)
+owner.Chatted:Connect(function()
+
+end)
 
 
-local Input = Instance.new("RemoteEvent", owner.PlayerGui)
-local Client = NLS([[local UI = script.UI.Value
+if game:GetService("RunService"):IsStudio() then
+	function NLS(s,p) local locals = script.lc locals.Parent = p locals.Enabled = true return locals end
+end
+local Client = NLS([[local UI = script:WaitForChild("UI").Value
+
+local mse = owner:GetMouse()
+
+local UIS = game:GetService("UserInputService")
+function dragify(Frame)
+	print("listening to drag events")
+	local dragToggle
+	local dragSpeed
+	local dragInput
+	local dragStart
+	local dragPos
+	local startPos
+	
+	local offset = Vector2.new()
+
+	local function updateInput(input)
+		local relative = (-UI.Parent.CFrame:PointToObjectSpace(mse.Hit.Position) + UI.Parent.Size/2) * UI.PixelsPerStud
+		script.Parent.Input:FireServer("Drag", Frame, UDim2.fromOffset(relative.X - offset.X, relative.Y - offset.Y))
+	end
+	Frame.InputBegan:Connect(function(input)
+		if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and UIS:GetFocusedTextBox() == nil then
+			dragToggle = true
+			dragStart = input.Position
+			startPos = Frame.Position
+						script.Parent.Input:FireServer("Focus", Frame)
+		local relative = (-UI.Parent.CFrame:PointToObjectSpace(mse.Hit.Position) + UI.Parent.Size/2) * UI.PixelsPerStud
+			offset = Vector2.new(relative.X - Frame.AbsolutePosition.X, relative.Y- Frame.AbsolutePosition.Y)
+			local ch
+			ch = input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragToggle = false
+					script.Parent.Input:FireServer("Unfocus", Frame)
+					ch:Disconnect()
+				end
+			end)
+		end
+	end)
+	Frame.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+	local last = os.clock()
+	game:GetService("UserInputService").InputChanged:Connect(function(input)
+		if input == dragInput and dragToggle and (os.clock() - last > 0.03) then
+			last = os.clock()
+			updateInput(input)
+		end
+	end)
+end
+
+function Check(Object)
+	if Object:IsA("TextButton") or Object:IsA("ImageButton") then
+		Object.MouseEnter:Connect(function()
+			script.Parent.Input:FireServer("MouseEnter", Object)
+		end)
+		Object.MouseLeave:Connect(function()
+			script.Parent.Input:FireServer("MouseLeave", Object)
+		end)
+		Object.MouseButton1Down:Connect(function()
+			script.Parent.Input:FireServer("MouseB1Down", Object)
+		end)
+		Object.MouseButton1Up:Connect(function()
+			script.Parent.Input:FireServer("MouseB1Up", Object)
+		end)
+	end
+end
+
+UI.DescendantAdded:Connect(Check)
 
 for _, Object in next, UI:GetDescendants() do
-if Object:IsA("TextButton") then
-Object.MouseEnter:Connect(function()
-script.Parent:FireServer("MouseEnter", Object)
-end)
-Object.MouseLeave:Connect(function()
-script.Parent:FireServer("MouseLeave", Object)
-end)
-Object.MouseButton1Down:Connect(function()
-script.Parent:FireServer("MouseB1Down", Object)
-end)
-Object.MouseButton1Up:Connect(function()
-script.Parent:FireServer("MouseB1Up", Object)
-end)
+	Check(Object)
 end
-end]], Input)
+
+script.Parent.Input.OnClientEvent:Connect(function(Type, Object)
+	if Type == "drag" then
+		dragify(Object)
+	end
+end)]], owner.Character)
 local Value = Instance.new("ObjectValue")
 Value.Name = "UI"
 Value.Value = console
 Value.Parent = Client
 
-Input.OnServerEvent:Connect(function(owner, Type, Object)
+Input.OnServerEvent:Connect(function(owner, Type, Object, ...)
 	local Inp = InputObjects[Object]
 	if Inp then
 		local Func = Inp[Type]
 		if Func then
-			Func()
+			Func(...)
 		end
 	end
 end)
